@@ -1,12 +1,15 @@
-module Ch5 (test)
+module Ch5
+  ( catMaybes
+  , test
+  )
   where
 
-import Data.List (List(Nil, Cons), (:))
+import Data.List (List(..), (:))
+import Data.Tuple (Tuple(..), fst, snd)
 import Data.Maybe (Maybe(..))
 import Effect (Effect)
 import Effect.Console (log)
-import Prelude (type (~>), Unit, discard, negate, otherwise, show, (+), (-), (/=), (<), (<<<), (==), (>), (>=))
-import Prim.RowList (Nil)
+import Prelude (type (~>), Unit, discard, max, negate, otherwise, show, (+), (-), (/=), (<), (<<<), (==), (>), (>=))
 
 
 flip :: ∀ a b c. (a -> b -> c) -> b -> (a -> c)
@@ -24,9 +27,11 @@ applyFlipped = flip apply
 
 infixl 1 applyFlipped as #
 
--- unitなどとも呼ばれている
 singleton :: ∀ a. a -> List a
 singleton x = x : Nil
+
+cons :: ∀ a. a -> List a -> List a
+cons x xs = Cons x xs
 
 null :: ∀ a. List a -> Boolean
 null Nil = true
@@ -90,10 +95,6 @@ reverse l = go Nil l where
   go acc Nil = acc
   go acc (x : xs) = go (x : acc) xs
 
-append :: ∀ a. List a -> List a -> List a
-append Nil rl = rl
-append (x : xs) rl = x : append xs rl
-
 concat :: ∀ a. List (List a) -> List a
 concat Nil = Nil
 concat (Nil : xss) = concat xss
@@ -149,12 +150,104 @@ range'' start end = go (Nil :: List Int) end start where
                  | otherwise = go (cur : acc) (cur + step) ter
   step = if start < end then (-1) else 1 
 
+take :: ∀ a. Int -> List a -> List a
+-- max 0 nで 負の整数が与えられたときに、無限stackに陥らないようにする.
+take n = reverse <<< go (max 0 n) (Nil :: List a) where
+  go :: Int -> List a -> List a -> List a
+  go _ acc Nil = acc
+  go 0 acc _ = acc
+  go i acc (x : xs) = go (i - 1) (x : acc) xs
+
+take' :: ∀ a. Int -> List a -> List a
+take' n = go (max 0 n) where
+  go :: Int -> List a -> List a
+  go _ Nil = Nil
+  go 0 _ = Nil
+  go i (x : xs) = x : go (i - 1) xs
+
+drop :: ∀ a. Int -> List a -> List a
+drop n = go (max n 0) where
+  go :: Int -> List a -> List a
+  go _ Nil = Nil
+  go 0 l = l
+  go i (_ : xs) = drop (i - 1) xs
+
+
+takeWhile :: ∀ a. (a -> Boolean) -> List a -> List a
+takeWhile _ Nil = Nil
+takeWhile p (x : xs) = 
+  if p x then x : takeWhile p xs else Nil
+
+
+dropWhile :: ∀ a. (a -> Boolean) -> List a -> List a
+dropWhile _ Nil = Nil
+dropWhile p l@(x : xs) = --creating FULL list by "l" then with "@" destructuring to "(x : xs)"
+  if p x then dropWhile p xs else l
+
+
+takeEnd :: ∀ a. Int -> List a -> List a
+takeEnd n l = snd (go l) where
+  go :: List a -> Tuple Int (List a)
+  go Nil = Tuple 0 Nil
+  go (x : xs) = let tup@(Tuple count acc) = go xs in
+    if count < n then Tuple (count + 1) (x : acc)
+    else tup
+
+dropEnd :: ∀ a. Int -> List a -> List a
+dropEnd n l = snd (go l) where
+  go :: List a -> Tuple Int (List a)
+  go Nil = Tuple 0 Nil
+  go (x : xs) = let Tuple count acc = go xs in
+    if count < n then Tuple (count + 1) acc  -- count n より小さい間はdropを続ける
+    else Tuple count (x : acc) -- count n　以上になったら accに prepend
+
+foldl :: ∀ a b. (b -> a -> b) -> b -> List a -> b
+foldl _ acc Nil = acc
+foldl f acc (x : xs) = foldl f (f acc x) xs
+
+reverse' :: ∀ a. List a -> List a
+reverse' l = foldl (flip cons) (Nil :: List a) l
+
+
+foldr' :: ∀ a b. (a -> b -> b) -> b -> List a -> b
+foldr' _ acc Nil = acc
+foldr' f acc (x : xs) = f x (foldr' f acc xs)
+
+foldr :: ∀ a b. (a -> b -> b) -> b -> List a -> b
+foldr f acc l = foldl (flip f) acc (reverse' l)
+
+append :: ∀ a. List a -> List a -> List a
+append l1 l2 = foldr cons l2 l1
+
+map :: ∀ a b. (a -> b) -> List a -> List b
+map f l = foldr (\x -> \y -> f x : y) (Nil :: List b) l
+
+flatMap :: ∀ a b. (a -> List b) -> List a -> List b
+flatMap f l = foldr (\x -> \y -> append (f x) y) (Nil :: List b) l
+
+map2 :: ∀ a b c. (a -> b -> c) -> List a -> List b -> List c
+map2 f la lb = 
+  flatMap (\xa -> map (\yb -> f xa yb) lb) la
+
+zip :: ∀ a b. List a -> List b -> List (Tuple a b)
+-- zip = map2 Tuple
+zip Nil _ = Nil
+zip _ Nil = Nil
+zip (x : xs) (y : ys) = Tuple x y : zip xs ys
+
+-- record -> columner
+unzip :: ∀ a b. List (Tuple a b) -> Tuple (List a) (List b)
+-- unzip l = Tuple (map fst l) (map snd l)
+unzip Nil = Tuple Nil Nil
+unzip ((Tuple a b) : xs) = let Tuple as bs = unzip xs in
+  Tuple (a : as) (b : bs)
 
 test :: Effect Unit
 test = do
   log $ show $ flip const 1 2
   flip const 1 2 # show # log
   log $ show $ singleton "xyz"
+  log $ show $ cons 0 (1 : 2 : Nil)
   log $ show $ null Nil
   log $ show $ null ("xyz" : Nil)
   log $ show $ snoc Nil "xyz"
@@ -182,6 +275,8 @@ test = do
   log $ show $ findLastIndex (_ == 10) (10 : 5 : 10 : -1 : 2 : 10 : Nil) 
   log $ show $ findLastIndex (_ == 10) (11 : 12 : Nil)
   log $ show $ reverse (10 : 20 : 30 : Nil)
+  log $ show $ reverse' (10 : 20 : 30 : Nil)
+  log $ show $ append (1 : 2 : 3 : Nil) (4 : 5 : 6 : Nil)
   log $ show $
     concat ((1 : 2 : 3 : Nil) : (4 : 5 : Nil) : (6 : Nil) : (Nil) : Nil)
   log $ show $ filter (4 > _) $ (1 : 2 : 3 : 4 : 5 : 6 : Nil)
@@ -197,6 +292,33 @@ test = do
 
   log $ show $ range'' 1 10
   log $ show $ range'' 3 (-3)
+  log $ show $ take 5 (12 : 13 : 14 : Nil)
+  log $ show $ take 5 (-7 : 9 : 0 : 12 : -13 : 45 : 976 : Nil)
+  log $ show $ take' 5 (12 : 13 : 14 : Nil)
+  log $ show $ take' 5 (-7 : 9 : 0 : 12 : -13 : 45 : 976 : Nil)
+  log $ show $ drop 2 (1:2:3:4:5:6:7:Nil)
+  log $ show $ drop 10 (Nil :: List Unit)
+  log $ show $ takeWhile (_ > 3) (5 : 4 : 3 : 99 : 101 : Nil)
+  log $ show $ takeWhile (_ == -17) (1 : 2 : 3 : Nil)
+  log $ show $ dropWhile (_ > 3) (5 : 4 : 3 : 99 : 101 : Nil)
+  log $ show $ dropWhile (_ == -17) (1 : 2 : 3 : Nil)
+  log $ show $ takeEnd 3 (1:2:3:4:5:6:Nil)
+  log $ show $ takeEnd 10 (1 : 2 : Nil)
+
+  log $ show $ dropEnd 3 (1:2:3:4:5:6:7:Nil)
+  log $ show $ dropEnd 10 (1 : Nil)
+
+  log $ show $ map (_ + 1) (1 : 2 : 3 : Nil)
+  log $ show $ flatMap (\x -> x : x : Nil) (1 : 2 : 3 : Nil)
+  log $ show $ map2 (\x -> \y -> x + y) (1 : 2 : 3 : Nil) (4 : 5 : 6 : Nil)
+  log $ show $ zip (1 : 2 : 3 : Nil) ("a" : "b" : "c" : Nil)
+  
+  log $ show $ unzip (Tuple 1 "a" : Tuple 2 "b" : Tuple 3 "c" : Nil)
+  log $ show $ unzip (Tuple "a" 1 : Tuple "b" 2 : Tuple "c" 3 : Nil)
+  log $ show $ unzip (Nil :: List (Tuple Unit Unit))
+  
+
+
 
 
 
