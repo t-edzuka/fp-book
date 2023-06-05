@@ -1,3 +1,7 @@
 {
-    "editor.formatOnPaste": true
+  "editor.formatOnPaste": true,
+  "python.formatting.provider": "black",
+  "editor.defaultFormatter": "nwolverson.ide-purescript",
+  "purescript.pursExe": "./node_modules/purescript/purs.bin",
+  "purescript.addNpmPath": true
 }
